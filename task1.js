@@ -1,45 +1,47 @@
 const crypto = require('crypto');
+var readlineSync = require('readline-sync');
 
-const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+const keyPair = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
-  });
+});
+const keyPair2 = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+});
 
-const { bobPrivateKey, BobPublicKey } = crypto.generateKeyPairSync('rsa', {
-        modulusLength: 2048,
-    });
+const bobPrivateKey = keyPair["privateKey"];
+const bobPublicKey = keyPair["publicKey"];
+const alicePrivateKey = keyPair["privateKey"];
+const alicePublicKey = keyPair["publicKey"];
 
-    // console.log(publicKey);
-    // console.log(publicKey2);
-
-// This is the data we want to encrypt
-const document = "my secret data"
+// const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+//     modulusLength: 2048,
+//   });
 
 
-// Bob encrypt the document using symmetric key
+// This is the data Bob want to send to Alice
+const dataTobeSentByBob = readlineSync.question('Bob, enter the message you want to send to Alice: ');
+
+
+// Bob encrypt the document using a symmetric key
 const algorithm = 'aes-192-cbc';
-const password = 'Password used to generate key';
-const symmetricKey = crypto.scryptSync(password, 'salt', 24);
-//console.log(symmetricKey);
+const password = readlineSync.question('Bob, enter the password you want to use to generate the symmetric key: '); // Password used to generate key
+const symmetricKey = crypto.scryptSync(password, 'salt', 24); // keylen:24
 
 const iv = crypto.randomBytes(16); // Initialization vector.
-//console.log(iv == null);
 
 const cipher = crypto.createCipheriv(algorithm, symmetricKey, iv);
 
-
-let encrypted = cipher.update(document, 'utf8', 'hex');
-encrypted += cipher.final('hex');
-console.log(encrypted);
-
-// will send encrypted data and iv to Alice.
+let encryptedData = cipher.update(dataTobeSentByBob, 'utf8', 'hex');
+encryptedData += cipher.final('hex');
+// Bob will send encrypted data and iv to Alice.
 
 
 
 
-// Encrypt the symmetric key using Alice's public key
-const encryptedData = crypto.publicEncrypt(
+// Bob encrypts the symmetric key using Alice's public key
+const encryptedSymmetricKey = crypto.publicEncrypt(
 	{
-		key: publicKey,
+		key: alicePublicKey,
 		padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
 		oaepHash: "sha256",
 	},
@@ -47,60 +49,60 @@ const encryptedData = crypto.publicEncrypt(
 	symmetricKey//Buffer.from(symmetricKey)
 )
 
-// sign the doocument using the private key.
+// Bob signs the doocument using his private key.
 const sign = crypto.createSign('SHA256');
-sign.write(encryptedData.toString());
+sign.write(encryptedSymmetricKey.toString());
 sign.end();
-const signature = sign.sign(privateKey, 'hex');
+const signature = sign.sign(bobPrivateKey, 'hex');
 
 
 
 
 
-// *********** Transmit
+// ************** Transmit step *******************
 // Bob sends digital signature, encrypted symmetric key, iv(used to generate decipher), and encrypted document to Alice.
-console.log("signature: " + signature);
-console.log("encrypted symmetric key: " + encryptedData.toString());
-console.log("iv: " + iv);
-console.log("symmetric encrypted document: " + encrypted);
+console.log("\nBob will send the following information to Alice, which everyone can see.\n");
+console.log("Digital signature: \n" + signature);
+console.log("RSA encrypted symmetric key:");
+console.log(encryptedSymmetricKey);
+console.log("iv: ");
+console.log(iv);
+console.log("Symmetric encrypted data: \n" + encryptedData);
+console.log();
 
 
 
 
 
 // Alice steps
+// Alice verifies the digital signature using Bob's public key to make sure the data actually comes from Bob. 
 const verify = crypto.createVerify('SHA256');
-verify.write(encryptedData.toString());
+verify.write(encryptedSymmetricKey.toString());
 verify.end();
-const isVerified = verify.verify(publicKey, signature, 'hex');
-console.log(isVerified);
+const isVerified = verify.verify(bobPublicKey, signature, 'hex');
 
+console.log("Alice verifies the digital signature using Bob's public key to make sure the data actually comes from Bob: " + isVerified);
 if (isVerified)
 {
-    // After verifying, decrypt the data using Alice's private key
+    // After verifying, Alice decrypts the encrypted symmetric key using her private key
     const decryptedSymmetricKey = crypto.privateDecrypt(
         {
-            key: privateKey,
-            // In order to decrypt the data, we need to specify the
-            // same hashing function and padding scheme that we used to
-            // encrypt the data in the previous step
+            key: alicePrivateKey,
             padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
             oaepHash: "sha256",
         },
-        encryptedData
+        encryptedSymmetricKey
     );
-
-    // The decrypted data is of the Buffer type, which we can convert to a
-    // string to reveal the original data
-    //console.log("decrypted data: ", decryptedData.toString())
-
-
+    console.log("Decrypted Symmetric Key: ");
     console.log(decryptedSymmetricKey);
+
+    
+    console.log("Alice decrypts the encrypted data using the symmetric key she just decrypted.");
     const decipher = crypto.createDecipheriv(algorithm, decryptedSymmetricKey, iv);
 
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    console.log(decrypted);
+    console.log("Original data sent from Bob: " + decrypted);
 } else {
-    Console.log("fail to verify!");
+    console.log("fail to verify! Data is not from Bob!");
 }
